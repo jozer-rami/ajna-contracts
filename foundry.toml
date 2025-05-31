@@ -2,5 +2,8 @@
 src = "src"
 out = "out"
 libs = ["lib"]
+remappings = [
+    "@layerzerolabs/test-devtools-evm-foundry/=lib/devtools/packages/test-devtools-evm-foundry"
+]
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
