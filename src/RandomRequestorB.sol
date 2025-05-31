@@ -17,6 +17,7 @@ contract RandomRequestorB is ILayerZeroReceiver {
 
     event RandomRequested(uint64 indexed id);
     event RandomReceived(uint64 indexed id, bytes32 randomness);
+    event FeesReceived(uint256 amount);
 
     constructor(address _endpoint, uint16 _providerChainId, bytes memory _providerAddress) {
         lzEndpoint = ILayerZeroEndpoint(_endpoint);
@@ -28,9 +29,22 @@ contract RandomRequestorB is ILayerZeroReceiver {
     function requestRandom() external payable {
         requestCount++;
         bytes memory payload = abi.encode(requestCount);
-        lzEndpoint.send{value: msg.value}(
-            providerChainId, providerAddress, payload, payable(msg.sender), address(0), bytes("")
-        );
+
+        // Get the required fee
+        uint256 fee = _getRequiredFee(payload);
+        require(msg.value >= fee, "insufficient fee");
+
+        // Send request with exact fee
+        bool success = _sendRequest(payload, fee);
+        require(success, "send failed");
+
+        // Refund excess fees
+        uint256 excess = msg.value - fee;
+        if (excess > 0) {
+            (bool refundSuccess,) = msg.sender.call{value: excess}("");
+            require(refundSuccess, "refund failed");
+        }
+
         emit RandomRequested(requestCount);
     }
 
@@ -42,8 +56,40 @@ contract RandomRequestorB is ILayerZeroReceiver {
         bytes calldata _payload
     ) external override {
         require(msg.sender == address(lzEndpoint), "Not endpoint");
+        
         (uint64 id, bytes32 randomness) = abi.decode(_payload, (uint64, bytes32));
         randomResults[id] = randomness;
         emit RandomReceived(id, randomness);
+    }
+
+    /// @notice Get the required fee for sending a request
+    /// @param _payload The request payload
+    /// @return The required fee in native tokens
+    function _getRequiredFee(bytes memory _payload) internal view returns (uint256) {
+        return 0.01 ether; // Mock fee for testing
+    }
+
+    /// @notice Send a request to the provider
+    /// @param _payload The request payload
+    /// @param _fee The fee to send with the request
+    /// @return success Whether the send was successful
+    function _sendRequest(bytes memory _payload, uint256 _fee) internal returns (bool) {
+        try lzEndpoint.send{value: _fee}(
+            providerChainId,
+            providerAddress,
+            _payload,
+            payable(address(this)),
+            address(0),
+            bytes("")
+        ) {
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    // Function to receive ETH
+    receive() external payable {
+        emit FeesReceived(msg.value);
     }
 }

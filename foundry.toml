@@ -2,8 +2,13 @@
 src = "src"
 out = "out"
 libs = ["lib"]
-remappings = [
-    "@layerzerolabs/test-devtools-evm-foundry/=lib/devtools/packages/test-devtools-evm-foundry"
-]
+via_ir = true
+optimizer = true
+optimizer_runs = 200
+
+[profile.via_ir]
+via_ir = true
+test = 'src'
+out = 'via_ir-out'
 
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

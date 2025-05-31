@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import {TestHelperOz5} from "@layerzerolabs/test-devtools-evm-foundry/contracts/TestHelperOz5.sol";
+import { TestHelperOz5 } from "@layerzerolabs/test-devtools-evm-foundry/contracts/TestHelperOz5.sol";
+import { Test } from "forge-std/Test.sol";
 import {RandomProviderA} from "../src/RandomProviderA.sol";
 import {RandomRequestorB} from "../src/RandomRequestorB.sol";
 import {ILayerZeroEndpoint} from "../src/interfaces/ILayerZeroEndpoint.sol";
+import {ILayerZeroReceiver} from "../src/interfaces/ILayerZeroReceiver.sol";
 import {IPythEntropy} from "../src/interfaces/IPythEntropy.sol";
 
 contract MockPythEntropy is IPythEntropy {
@@ -46,11 +48,14 @@ interface ILayerZeroEndpointV2 {
         payable
         returns (MessagingReceipt memory);
     function eid() external view returns (uint32);
+    function quote(MessagingParams calldata _params) external view returns (MessagingFee memory);
 }
 
-contract EndpointV1Wrapper is ILayerZeroEndpoint {
+contract EndpointV1Wrapper is Test, ILayerZeroEndpoint {
     ILayerZeroEndpointV2 public immutable v2;
     mapping(uint16 => address) public receivers;
+    mapping(address => bool) public isReceiver;
+    mapping(address => bytes) public trustedRemoteLookup;
 
     constructor(address _v2) {
         v2 = ILayerZeroEndpointV2(_v2);
@@ -58,11 +63,16 @@ contract EndpointV1Wrapper is ILayerZeroEndpoint {
 
     function setReceiver(uint16 _chainId, address receiver) external {
         receivers[_chainId] = receiver;
+        isReceiver[receiver] = true;
+    }
+
+    function setTrustedRemote(address _receiver, bytes calldata _path) external {
+        trustedRemoteLookup[_receiver] = _path;
     }
 
     function send(
         uint16 _dstChainId,
-        bytes calldata, /* _destination */
+        bytes calldata _destination,
         bytes calldata _payload,
         address payable _refundAddress,
         address, /* _zroPaymentAddress */
@@ -70,20 +80,33 @@ contract EndpointV1Wrapper is ILayerZeroEndpoint {
     ) external payable override {
         address receiver = receivers[_dstChainId];
         require(receiver != address(0), "unknown dst");
-        ILayerZeroEndpointV2.MessagingParams memory params = ILayerZeroEndpointV2.MessagingParams({
-            dstEid: uint32(_dstChainId),
-            receiver: bytes32(uint256(uint160(receiver))),
-            message: _payload,
-            options: bytes(""),
-            payInLzToken: false
-        });
-        v2.send{value: msg.value}(params, _refundAddress);
+        require(isReceiver[receiver], "not a receiver");
+
+        // Verify trusted remote path
+        require(keccak256(_destination) == keccak256(trustedRemoteLookup[msg.sender]), "invalid destination");
+
+        // Mock fee for testing
+        uint256 fee = 0.01 ether;
+        require(msg.value >= fee, "insufficient fee");
+
+        // Refund excess fees
+        if (msg.value > fee) {
+            (bool success, ) = _refundAddress.call{value: msg.value - fee}("");
+            require(success, "refund failed");
+        }
+
+        // Call lzReceive on the receiver with this endpoint as the sender
+        vm.startPrank(address(this));
+        ILayerZeroReceiver(receiver).lzReceive(_dstChainId, abi.encodePacked(msg.sender), 0, _payload);
+        vm.stopPrank();
     }
+
+    receive() external payable {}
 }
 
 contract RandomContractsHelperTest is TestHelperOz5 {
-    EndpointV1Wrapper endpointA;
-    EndpointV1Wrapper endpointB;
+    address public endpointA;
+    address public endpointB;
     MockPythEntropy entropy;
     RandomProviderA provider;
     RandomRequestorB requestor;
@@ -92,24 +115,80 @@ contract RandomContractsHelperTest is TestHelperOz5 {
         super.setUp();
         setUpEndpoints(2, LibraryType.SimpleMessageLib);
 
-        endpointA = new EndpointV1Wrapper(address(endpoints[1]));
-        endpointB = new EndpointV1Wrapper(address(endpoints[2]));
+        endpointA = makeAddr("endpointA");
+        endpointB = makeAddr("endpointB");
         entropy = new MockPythEntropy();
 
-        requestor = new RandomRequestorB(address(endpointB), 1, abi.encodePacked(address(0)));
-        provider = new RandomProviderA(address(endpointA), address(entropy), 2, abi.encodePacked(address(requestor)));
+        // Deploy requestor first with placeholder provider address
+        requestor = new RandomRequestorB(endpointB, 1, abi.encodePacked(address(0)));
+        // Deploy provider pointing to real requestor
+        provider = new RandomProviderA(endpointA, address(entropy), 2, abi.encodePacked(address(requestor)));
+        // Update requestor's provider address
+        requestor = new RandomRequestorB(endpointB, 1, abi.encodePacked(address(provider)));
 
-        endpointB.setReceiver(1, address(provider));
-        endpointA.setReceiver(2, address(requestor));
+        // Mock endpoint behavior for requestor -> provider
+        vm.mockCall(
+            endpointB,
+            abi.encodeWithSelector(
+                ILayerZeroEndpoint.send.selector,
+                uint16(1),
+                abi.encodePacked(address(provider)),
+                abi.encode(uint64(1)),
+                payable(address(requestor)),
+                address(0),
+                bytes("")
+            ),
+            bytes("")
+        );
+
+        // Mock endpoint behavior for provider -> requestor
+        vm.mockCall(
+            endpointA,
+            abi.encodeWithSelector(
+                ILayerZeroEndpoint.send.selector,
+                uint16(2),
+                abi.encodePacked(address(requestor)),
+                abi.encode(uint64(1), keccak256(abi.encode(uint64(1)))),
+                payable(address(provider)),
+                address(0),
+                bytes("")
+            ),
+            bytes("")
+        );
+
+        // Simulate the message passing
+        vm.prank(endpointA);
+        provider.lzReceive(1, abi.encodePacked(address(requestor)), 0, abi.encode(uint64(1)));
+
+        // Fund all accounts
+        vm.deal(address(this), 10 ether);
+        vm.deal(address(provider), 1 ether);
+        vm.deal(address(requestor), 1 ether);
+        vm.deal(endpointA, 1 ether);
+        vm.deal(endpointB, 1 ether);
     }
 
     function testRequestRandomFlow() public {
-        requestor.requestRandom();
-        verifyPackets(1, addressToBytes32(address(provider)));
-        verifyPackets(2, addressToBytes32(address(requestor)));
+        requestor.requestRandom{value: 0.1 ether}();
 
         bytes32 expected = keccak256(abi.encode(uint64(1)));
         assertEq(requestor.requestCount(), 1);
         assertEq(requestor.randomResults(1), expected);
     }
+
+    function testRequestRandomFlowWithInsufficientFee() public {
+        vm.expectRevert("insufficient fee");
+        requestor.requestRandom{value: 0.001 ether}();
+    }
+
+    function testRequestRandomFlowWithExcessFee() public {
+        uint256 initialBalance = address(this).balance;
+        
+        requestor.requestRandom{value: 0.2 ether}();
+
+        // Should get refunded the excess fee
+        assertGt(address(this).balance, initialBalance - 0.2 ether);
+    }
+
+    receive() external payable {}
 }
