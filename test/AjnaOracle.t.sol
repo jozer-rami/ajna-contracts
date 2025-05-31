@@ -3,7 +3,6 @@ pragma solidity ^0.8.18;
 
 import {Test, console} from "forge-std/Test.sol";
 import {AJNAOracle} from "../src/AjnaOracle.sol";
-import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AjnaOracleTest is Test {
@@ -13,7 +12,6 @@ contract AjnaOracleTest is Test {
     address private backendSigner;
     address private user = address(0xBEEF);
     address private admin = address(0xADEF);
-    bytes32 private constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     event RitualOpened(uint256 indexed tokenId, uint256 indexed nonce, uint256 indexed sacredTimestamp);
     event WhitelistToggled(bool enabled);
@@ -53,9 +51,8 @@ contract AjnaOracleTest is Test {
         assertEq(oracle.name(), "AJNAOracle");
         assertEq(oracle.symbol(), "AJNA");
         assertEq(oracle.backendSigner(), backendSigner);
-        assertTrue(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), admin));
-        assertTrue(oracle.hasRole(oracle.ADMIN_ROLE(), admin));
-        assertTrue(oracle.whitelistEnabled()); // Whitelist should be enabled by default
+        assertEq(oracle.owner(), admin);
+        assertTrue(oracle.whitelistEnabled());
     }
 
     // Whitelist Toggle Tests
@@ -208,7 +205,7 @@ contract AjnaOracleTest is Test {
 
     function testSetBaseURIUnauthorized() public {
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, ADMIN_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
         oracle.setBaseURI("https://api.example.com/");
     }
 
@@ -222,7 +219,7 @@ contract AjnaOracleTest is Test {
 
     function testSetBackendSignerUnauthorized() public {
         vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, ADMIN_ROLE));
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
         oracle.setBackendSigner(address(0x9876));
     }
 

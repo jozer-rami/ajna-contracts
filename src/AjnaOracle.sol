@@ -4,7 +4,6 @@ pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
-import "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
@@ -17,16 +16,12 @@ contract AJNAOracle is
     ERC721,
     ERC721Enumerable,
     ERC721URIStorage,
-    AccessControlEnumerable,
     Ownable,
     ReentrancyGuard,
     EIP712
 {
     using Strings for uint256;
     using ECDSA for bytes32;
-
-    /// Roles
-    bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// Backend signer for voucher redemption
     address public backendSigner;
@@ -73,9 +68,6 @@ contract AJNAOracle is
         backendSigner = backendSigner_;
         _baseTokenURI = baseURI_;
         whitelistEnabled = true; // Whitelist is enabled by default
-
-        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(ADMIN_ROLE, msg.sender);
     }
 
     /// @notice Redeem a signed voucher to mint a revelation.
@@ -121,13 +113,13 @@ contract AJNAOracle is
         return tokenId;
     }
 
-    /// @notice Set a new base URI for token metadata. Only admin.
-    function setBaseURI(string calldata newBaseURI) external onlyRole(ADMIN_ROLE) {
+    /// @notice Set a new base URI for token metadata. Only owner.
+    function setBaseURI(string calldata newBaseURI) external onlyOwner {
         _baseTokenURI = newBaseURI;
     }
 
-    /// @notice Update the backend signer address. Only admin.
-    function setBackendSigner(address newSigner) external onlyRole(ADMIN_ROLE) {
+    /// @notice Update the backend signer address. Only owner.
+    function setBackendSigner(address newSigner) external onlyOwner {
         backendSigner = newSigner;
     }
 
@@ -191,7 +183,7 @@ contract AJNAOracle is
         public
         view
         virtual
-        override(ERC721, ERC721Enumerable, ERC721URIStorage, AccessControlEnumerable)
+        override(ERC721, ERC721Enumerable, ERC721URIStorage)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
