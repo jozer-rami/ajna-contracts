@@ -37,6 +37,9 @@ contract AJNAOracle is
     /// Whitelisted addresses allowed to mint directly
     mapping(address => bool) public whitelist;
 
+    /// Whether whitelist is enabled
+    bool public whitelistEnabled;
+
     /// Typehash for EIP712 voucher
     bytes32 private constant _VOUCHER_TYPEHASH =
         keccak256("Voucher(address to,uint256 nonce,uint256 deadline)");
@@ -54,6 +57,9 @@ contract AJNAOracle is
         uint256 indexed sacredTimestamp
     );
 
+    /// Emitted when whitelist is toggled
+    event WhitelistToggled(bool enabled);
+
     constructor(
         string memory name_,
         string memory symbol_,
@@ -66,6 +72,7 @@ contract AJNAOracle is
     {
         backendSigner = backendSigner_;
         _baseTokenURI = baseURI_;
+        whitelistEnabled = true; // Whitelist is enabled by default
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
@@ -134,13 +141,19 @@ contract AJNAOracle is
         whitelist[account] = false;
     }
 
+    /// @notice Toggle whitelist functionality. Only owner.
+    function toggleWhitelist() external onlyOwner {
+        whitelistEnabled = !whitelistEnabled;
+        emit WhitelistToggled(whitelistEnabled);
+    }
+
     /// @notice Mint a revelation directly for whitelisted senders.
     function mintWhitelisted(
         uint256 cardId,
         string calldata birthHash,
         string calldata messageCID
     ) external nonReentrant {
-        require(whitelist[msg.sender], "Not whitelisted");
+        require(!whitelistEnabled || whitelist[msg.sender], "Not whitelisted");
         uint256 tokenId = _mintRevelation(msg.sender, birthHash, messageCID, cardId);
         uint256 sacredTimestamp = block.timestamp;
         emit RitualOpened(tokenId, 0, sacredTimestamp);
