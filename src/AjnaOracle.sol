@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.18;
 
-import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/StringsUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/cryptography/ECDSAUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 // Interface for ERC-6551 Registry
 interface IERC6551Registry {
@@ -28,26 +26,23 @@ interface IERC6551Registry {
 /// @title AJNA Oracle Ritual Contract
 /// @notice Gate ritual with World ID, mint NFT revelations, integrate ERC-6551
 contract AJNAOracle is
-    Initializable,
-    ERC721Upgradeable,
-    ERC721EnumerableUpgradeable,
-    ERC721URIStorageUpgradeable,
-    AccessControlEnumerableUpgradeable,
-    OwnableUpgradeable,
-    UUPSUpgradeable,
-    ReentrancyGuardUpgradeable,
-    EIP712Upgradeable
+    ERC721,
+    ERC721Enumerable,
+    ERC721URIStorage,
+    AccessControlEnumerable,
+    Ownable,
+    ReentrancyGuard,
+    EIP712
 {
-    using CountersUpgradeable for CountersUpgradeable.Counter;
-    using StringsUpgradeable for uint256;
-    using ECDSAUpgradeable for bytes32;
+    using Strings for uint256;
+    using ECDSA for bytes32;
 
     /// Roles
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     /// ERC-6551 Registry & implementation
-    IERC6551Registry public erc6551Registry;
-    address public erc6551Implementation;
+    IERC6551Registry public immutable erc6551Registry;
+    address public immutable erc6551Implementation;
 
     /// Backend signer for voucher redemption
     address public backendSigner;
@@ -63,12 +58,10 @@ contract AJNAOracle is
         keccak256("Voucher(address to,uint256 nonce,uint256 deadline)");
 
     /// Counter for token IDs
-    CountersUpgradeable.Counter private _tokenIdCounter;
+    uint256 private _nextTokenId;
 
     /// Base URI / fallback
     string private _baseTokenURI;
-
-
 
     /// Emitted when a ritual is opened and NFT is minted
     event RitualOpened(
@@ -77,36 +70,26 @@ contract AJNAOracle is
         uint256 indexed sacredTimestamp
     );
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() initializer {}
-
-    function initialize(
+    constructor(
         string memory name_,
         string memory symbol_,
         address registryAddress_,
         address implementationAddress_,
         address backendSigner_,
         string memory baseURI_
-    ) public initializer {
-        __ERC721_init(name_, symbol_);
-        __ERC721Enumerable_init();
-        __AccessControlEnumerable_init();
-        __Ownable_init();
-        __UUPSUpgradeable_init();
-        __ReentrancyGuard_init();
-        __EIP712_init("AJNAOracle", "1");
+    ) 
+        ERC721(name_, symbol_)
+        Ownable(msg.sender)
+        EIP712("AJNAOracle", "1")
+    {
+        erc6551Registry = IERC6551Registry(registryAddress_);
+        erc6551Implementation = implementationAddress_;
+        backendSigner = backendSigner_;
+        _baseTokenURI = baseURI_;
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ADMIN_ROLE, msg.sender);
-
-        erc6551Registry = IERC6551Registry(registryAddress_);
-        erc6551Implementation = implementationAddress_;
-
-        backendSigner = backendSigner_;
-
-        _baseTokenURI = baseURI_;
     }
-
 
     /// @notice Redeem a signed voucher to mint a revelation.
     function redeemVoucher(
@@ -139,8 +122,7 @@ contract AJNAOracle is
         string memory messageCID,
         uint256 cardId
     ) internal returns (uint256) {
-        _tokenIdCounter.increment();
-        uint256 tokenId = _tokenIdCounter.current();
+        uint256 tokenId = _nextTokenId++;
 
         _safeMint(to, tokenId);
 
@@ -173,9 +155,6 @@ contract AJNAOracle is
         );
     }
 
-    /// @notice Override required by Solidity for UUPS upgradeability
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(ADMIN_ROLE) {}
-
     /// @notice Set a new base URI for token metadata. Only admin.
     function setBaseURI(string calldata newBaseURI) external onlyRole(ADMIN_ROLE) {
         _baseTokenURI = newBaseURI;
@@ -203,25 +182,36 @@ contract AJNAOracle is
         string calldata messageCID
     ) external nonReentrant {
         require(whitelist[msg.sender], "Not whitelisted");
-        _mintRevelation(msg.sender, birthHash, messageCID, cardId);
+        uint256 tokenId = _mintRevelation(msg.sender, birthHash, messageCID, cardId);
+        uint256 sacredTimestamp = block.timestamp;
+        emit RitualOpened(tokenId, 0, sacredTimestamp);
     }
-
 
     /// @dev The following functions are overrides required by Solidity.
-    function _beforeTokenTransfer(
-        address from,
-        address to,
-        uint256 tokenId,
-        uint256 batchSize
-    ) internal virtual override(ERC721Upgradeable, ERC721EnumerableUpgradeable) {
-        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        virtual
+        override(ERC721, ERC721Enumerable)
+        returns (address)
+    {
+        return super._update(to, tokenId, auth);
     }
 
-    function _burn(uint256 tokenId) internal override(ERC721Upgradeable, ERC721URIStorageUpgradeable) {
-        super._burn(tokenId);
+    function _increaseBalance(address account, uint128 amount)
+        internal
+        virtual
+        override(ERC721, ERC721Enumerable)
+    {
+        super._increaseBalance(account, amount);
     }
 
-    function tokenURI(uint256 tokenId) public view virtual override(ERC721Upgradeable, ERC721URIStorageUpgradeable) returns (string memory) {
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        virtual
+        override(ERC721, ERC721URIStorage)
+        returns (string memory)
+    {
         return super.tokenURI(tokenId);
     }
 
@@ -229,17 +219,9 @@ contract AJNAOracle is
         public
         view
         virtual
-        override(
-            ERC721Upgradeable,
-            ERC721EnumerableUpgradeable,
-            ERC721URIStorageUpgradeable,
-            AccessControlEnumerableUpgradeable
-        )
+        override(ERC721, ERC721Enumerable, ERC721URIStorage, AccessControlEnumerable)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
     }
-
-    /// @dev Storage gap for future upgrades
-    uint256[50] private __gap;
 }
