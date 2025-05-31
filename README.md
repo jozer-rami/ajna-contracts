@@ -119,6 +119,34 @@ provide the id of the remote chain so that both sides can communicate.
    );
    ```
 
+### Deployment Script
+
+You can automate this setup using `RandomDeployer` from the `script` folder. The
+script deploys either contract depending on the `ROLE` environment variable and
+expects the LayerZero endpoints, chain ids and the Pyth entropy address to be
+provided as environment variables.
+
+Example for deploying the provider on Base:
+
+```bash
+ROLE=provider \
+PROVIDER_ENDPOINT=<base_lz_endpoint> \
+REQUESTOR_CHAIN_ID=<worldchain_id> \
+REQUESTOR_ADDRESS=<requestor_address> \
+PYTH_ENTROPY=<pyth_entropy_on_base> \
+forge script script/RandomDeployer.s.sol:RandomDeployer --rpc-url <base_rpc> --private-key <key>
+```
+
+To deploy the requestor on World Chain:
+
+```bash
+ROLE=requestor \
+REQUESTOR_ENDPOINT=<worldchain_lz_endpoint> \
+PROVIDER_CHAIN_ID=<base_chain_id> \
+PROVIDER_ADDRESS=<provider_address> \
+forge script script/RandomDeployer.s.sol:RandomDeployer --rpc-url <worldchain_rpc> --private-key <key>
+```
+
 ### Example Usage
 
 Calling `requestRandom` on `RandomRequestorB` sends a message to the provider.
