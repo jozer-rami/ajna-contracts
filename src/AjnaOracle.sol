@@ -4,6 +4,7 @@ pragma solidity ^0.8.18;
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/Base64Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
@@ -59,8 +60,7 @@ contract AJNAOracle is
     mapping(address => bool) public whitelist;
 
     /// Typehash for EIP712 voucher
-    bytes32 private constant _VOUCHER_TYPEHASH =
-        keccak256("Voucher(address to,uint256 nonce,uint256 deadline)");
+    bytes32 private constant _VOUCHER_TYPEHASH = keccak256("Voucher(address to,uint256 nonce,uint256 deadline)");
 
     /// Counter for token IDs
     CountersUpgradeable.Counter private _tokenIdCounter;
@@ -68,14 +68,13 @@ contract AJNAOracle is
     /// Base URI / fallback
     string private _baseTokenURI;
 
-
+    /// Per-token data
+    mapping(uint256 => string) private _messages;
+    mapping(uint256 => string) private _birthHashes;
+    mapping(uint256 => uint256) private _cardIds;
 
     /// Emitted when a ritual is opened and NFT is minted
-    event RitualOpened(
-        uint256 indexed tokenId,
-        uint256 indexed nonce,
-        uint256 indexed sacredTimestamp
-    );
+    event RitualOpened(uint256 indexed tokenId, uint256 indexed nonce, uint256 indexed sacredTimestamp);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() initializer {}
@@ -107,7 +106,6 @@ contract AJNAOracle is
         _baseTokenURI = baseURI_;
     }
 
-
     /// @notice Redeem a signed voucher to mint a revelation.
     function redeemVoucher(
         address to,
@@ -116,7 +114,7 @@ contract AJNAOracle is
         bytes calldata signature,
         uint256 cardId,
         string calldata birthHash,
-        string calldata messageCID
+        string calldata message
     ) external nonReentrant {
         require(block.timestamp <= deadline, "Voucher expired");
 
@@ -127,27 +125,24 @@ contract AJNAOracle is
         require(!usedNonces[nonce], "Nonce already used");
         usedNonces[nonce] = true;
 
-        uint256 tokenId = _mintRevelation(to, birthHash, messageCID, cardId);
+        uint256 tokenId = _mintRevelation(to, birthHash, message, cardId);
         uint256 sacredTimestamp = block.timestamp;
         emit RitualOpened(tokenId, nonce, sacredTimestamp);
     }
 
     /// @notice Internal function to handle NFT minting and ERC-6551 account creation
-    function _mintRevelation(
-        address to,
-        string memory birthHash,
-        string memory messageCID,
-        uint256 cardId
-    ) internal returns (uint256) {
+    function _mintRevelation(address to, string memory birthHash, string memory message, uint256 cardId)
+        internal
+        returns (uint256)
+    {
         _tokenIdCounter.increment();
         uint256 tokenId = _tokenIdCounter.current();
 
         _safeMint(to, tokenId);
 
-        // Construct tokenURI pointing to baseURI + messageCID
-        // Assume baseURI ends with trailing slash
-        string memory uri = string(abi.encodePacked(_baseTokenURI, messageCID));
-        _setTokenURI(tokenId, uri);
+        _messages[tokenId] = message;
+        _birthHashes[tokenId] = birthHash;
+        _cardIds[tokenId] = cardId;
 
         // Create ERC-6551 account for this token
         _createTokenBoundAccount(tokenId);
@@ -163,14 +158,7 @@ contract AJNAOracle is
             chainId := chainid()
         }
 
-        erc6551Registry.createAccount(
-            erc6551Implementation,
-            chainId,
-            address(this),
-            tokenId,
-            0,
-            initData
-        );
+        erc6551Registry.createAccount(erc6551Implementation, chainId, address(this), tokenId, 0, initData);
     }
 
     /// @notice Override required by Solidity for UUPS upgradeability
@@ -197,23 +185,20 @@ contract AJNAOracle is
     }
 
     /// @notice Mint a revelation directly for whitelisted senders.
-    function mintWhitelisted(
-        uint256 cardId,
-        string calldata birthHash,
-        string calldata messageCID
-    ) external nonReentrant {
+    function mintWhitelisted(uint256 cardId, string calldata birthHash, string calldata message)
+        external
+        nonReentrant
+    {
         require(whitelist[msg.sender], "Not whitelisted");
-        _mintRevelation(msg.sender, birthHash, messageCID, cardId);
+        _mintRevelation(msg.sender, birthHash, message, cardId);
     }
 
-
     /// @dev The following functions are overrides required by Solidity.
-    function _beforeTokenTransfer(
-        address from,
-        address to,
-        uint256 tokenId,
-        uint256 batchSize
-    ) internal virtual override(ERC721Upgradeable, ERC721EnumerableUpgradeable) {
+    function _beforeTokenTransfer(address from, address to, uint256 tokenId, uint256 batchSize)
+        internal
+        virtual
+        override(ERC721Upgradeable, ERC721EnumerableUpgradeable)
+    {
         super._beforeTokenTransfer(from, to, tokenId, batchSize);
     }
 
@@ -221,8 +206,51 @@ contract AJNAOracle is
         super._burn(tokenId);
     }
 
-    function tokenURI(uint256 tokenId) public view virtual override(ERC721Upgradeable, ERC721URIStorageUpgradeable) returns (string memory) {
-        return super.tokenURI(tokenId);
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        virtual
+        override(ERC721Upgradeable, ERC721URIStorageUpgradeable)
+        returns (string memory)
+    {
+        string memory message = _messages[tokenId];
+        string memory birthHash = _birthHashes[tokenId];
+        uint256 cardId = _cardIds[tokenId];
+
+        string memory svg = string(
+            abi.encodePacked(
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">',
+                '<rect width="100%" height="100%" fill="black"/>',
+                '<text x="50%" y="50%" fill="white" font-size="16" dominant-baseline="middle" text-anchor="middle">',
+                message,
+                "</text></svg>"
+            )
+        );
+
+        string memory image =
+            string(abi.encodePacked("data:image/svg+xml;base64,", Base64Upgradeable.encode(bytes(svg))));
+
+        string memory json = Base64Upgradeable.encode(
+            bytes(
+                string(
+                    abi.encodePacked(
+                        '{"name":"Revelation #',
+                        tokenId.toString(),
+                        '","description":"Onchain Revelation","attributes":[',
+                        '{"trait_type":"Birth Hash","value":"',
+                        birthHash,
+                        '"},',
+                        '{"trait_type":"Card ID","value":"',
+                        cardId.toString(),
+                        '"}],"image":"',
+                        image,
+                        '"}'
+                    )
+                )
+            )
+        );
+
+        return string(abi.encodePacked("data:application/json;base64,", json));
     }
 
     function supportsInterface(bytes4 interfaceId)
@@ -230,10 +258,7 @@ contract AJNAOracle is
         view
         virtual
         override(
-            ERC721Upgradeable,
-            ERC721EnumerableUpgradeable,
-            ERC721URIStorageUpgradeable,
-            AccessControlEnumerableUpgradeable
+            ERC721Upgradeable, ERC721EnumerableUpgradeable, ERC721URIStorageUpgradeable, AccessControlEnumerableUpgradeable
         )
         returns (bool)
     {
