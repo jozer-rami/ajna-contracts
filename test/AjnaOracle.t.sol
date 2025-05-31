@@ -71,29 +71,40 @@ contract AjnaOracleTest is Test {
     function testRedeemVoucher() public {
         bytes memory sig = _signVoucher(user, 1, block.timestamp + 1 days);
         vm.prank(user);
-        oracle.redeemVoucher(user, 1, block.timestamp + 1 days, sig, 1, "hash", "cid");
+        oracle.redeemVoucher(user, 1, block.timestamp + 1 days, sig, 1, "hash", "hello");
         assertEq(oracle.ownerOf(1), user);
     }
 
     function testRedeemVoucherNonceReuse() public {
         bytes memory sig = _signVoucher(user, 1, block.timestamp + 1 days);
         vm.prank(user);
-        oracle.redeemVoucher(user, 1, block.timestamp + 1 days, sig, 1, "hash", "cid");
+        oracle.redeemVoucher(user, 1, block.timestamp + 1 days, sig, 1, "hash", "hello");
         vm.prank(user);
         vm.expectRevert("Nonce already used");
-        oracle.redeemVoucher(user, 1, block.timestamp + 1 days, sig, 1, "hash", "cid");
+        oracle.redeemVoucher(user, 1, block.timestamp + 1 days, sig, 1, "hash", "hello");
     }
 
     function testWhitelistMinting() public {
         oracle.addToWhitelist(user);
         vm.prank(user);
-        oracle.mintWhitelisted(1, "hash", "cid");
+        oracle.mintWhitelisted(1, "hash", "hello");
         assertEq(oracle.ownerOf(1), user);
+    }
+
+    function testTokenURIOnchain() public {
+        bytes memory sig = _signVoucher(user, 2, block.timestamp + 1 days);
+        vm.prank(user);
+        oracle.redeemVoucher(user, 2, block.timestamp + 1 days, sig, 1, "hash", "hello");
+        string memory uri = oracle.tokenURI(2);
+        bytes memory prefix = bytes("data:application/json;base64,");
+        for (uint256 i = 0; i < prefix.length; i++) {
+            assertEq(bytes(uri)[i], prefix[i]);
+        }
     }
 
     function testWhitelistMintingReverts() public {
         vm.prank(user);
         vm.expectRevert("Not whitelisted");
-        oracle.mintWhitelisted(1, "hash", "cid");
+        oracle.mintWhitelisted(1, "hash", "hello");
     }
 }
