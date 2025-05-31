@@ -5,6 +5,7 @@ import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721EnumerableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
@@ -32,6 +33,7 @@ contract AJNAOracle is
     ERC721EnumerableUpgradeable,
     ERC721URIStorageUpgradeable,
     AccessControlEnumerableUpgradeable,
+    OwnableUpgradeable,
     UUPSUpgradeable,
     ReentrancyGuardUpgradeable,
     EIP712Upgradeable
@@ -52,6 +54,9 @@ contract AJNAOracle is
 
     /// Mapping to record used nonces
     mapping(uint256 => bool) public usedNonces;
+
+    /// Whitelisted addresses allowed to mint directly
+    mapping(address => bool) public whitelist;
 
     /// Typehash for EIP712 voucher
     bytes32 private constant _VOUCHER_TYPEHASH =
@@ -86,6 +91,7 @@ contract AJNAOracle is
         __ERC721_init(name_, symbol_);
         __ERC721Enumerable_init();
         __AccessControlEnumerable_init();
+        __Ownable_init();
         __UUPSUpgradeable_init();
         __ReentrancyGuard_init();
         __EIP712_init("AJNAOracle", "1");
@@ -178,6 +184,26 @@ contract AJNAOracle is
     /// @notice Update the backend signer address. Only admin.
     function setBackendSigner(address newSigner) external onlyRole(ADMIN_ROLE) {
         backendSigner = newSigner;
+    }
+
+    /// @notice Add an address to the whitelist. Only owner.
+    function addToWhitelist(address account) external onlyOwner {
+        whitelist[account] = true;
+    }
+
+    /// @notice Remove an address from the whitelist. Only owner.
+    function removeFromWhitelist(address account) external onlyOwner {
+        whitelist[account] = false;
+    }
+
+    /// @notice Mint a revelation directly for whitelisted senders.
+    function mintWhitelisted(
+        uint256 cardId,
+        string calldata birthHash,
+        string calldata messageCID
+    ) external nonReentrant {
+        require(whitelist[msg.sender], "Not whitelisted");
+        _mintRevelation(msg.sender, birthHash, messageCID, cardId);
     }
 
 
