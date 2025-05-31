@@ -11,20 +11,8 @@ import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
-// Interface for ERC-6551 Registry
-interface IERC6551Registry {
-    function createAccount(
-        address implementation,
-        uint256 chainId,
-        address tokenContract,
-        uint256 tokenId,
-        uint256 salt,
-        bytes memory initData
-    ) external returns (address);
-}
-
 /// @title AJNA Oracle Ritual Contract
-/// @notice Gate ritual with World ID, mint NFT revelations, integrate ERC-6551
+/// @notice Gate ritual with World ID, mint NFT revelations
 contract AJNAOracle is
     ERC721,
     ERC721Enumerable,
@@ -39,10 +27,6 @@ contract AJNAOracle is
 
     /// Roles
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
-    /// ERC-6551 Registry & implementation
-    IERC6551Registry public immutable erc6551Registry;
-    address public immutable erc6551Implementation;
 
     /// Backend signer for voucher redemption
     address public backendSigner;
@@ -73,8 +57,6 @@ contract AJNAOracle is
     constructor(
         string memory name_,
         string memory symbol_,
-        address registryAddress_,
-        address implementationAddress_,
         address backendSigner_,
         string memory baseURI_
     ) 
@@ -82,8 +64,6 @@ contract AJNAOracle is
         Ownable(msg.sender)
         EIP712("AJNAOracle", "1")
     {
-        erc6551Registry = IERC6551Registry(registryAddress_);
-        erc6551Implementation = implementationAddress_;
         backendSigner = backendSigner_;
         _baseTokenURI = baseURI_;
 
@@ -115,7 +95,7 @@ contract AJNAOracle is
         emit RitualOpened(tokenId, nonce, sacredTimestamp);
     }
 
-    /// @notice Internal function to handle NFT minting and ERC-6551 account creation
+    /// @notice Internal function to handle NFT minting
     function _mintRevelation(
         address to,
         string memory birthHash,
@@ -131,28 +111,7 @@ contract AJNAOracle is
         string memory uri = string(abi.encodePacked(_baseTokenURI, messageCID));
         _setTokenURI(tokenId, uri);
 
-        // Create ERC-6551 account for this token
-        _createTokenBoundAccount(tokenId);
-
         return tokenId;
-    }
-
-    /// @notice Create a token-bound account via ERC-6551 registry
-    function _createTokenBoundAccount(uint256 tokenId) internal {
-        bytes memory initData = "";
-        uint256 chainId;
-        assembly {
-            chainId := chainid()
-        }
-
-        erc6551Registry.createAccount(
-            erc6551Implementation,
-            chainId,
-            address(this),
-            tokenId,
-            0,
-            initData
-        );
     }
 
     /// @notice Set a new base URI for token metadata. Only admin.

@@ -5,61 +5,24 @@ import {Test, console} from "forge-std/Test.sol";
 import {AJNAOracle} from "../src/AjnaOracle.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 
-interface IERC6551Registry {
-    function createAccount(
-        address implementation,
-        uint256 chainId,
-        address tokenContract,
-        uint256 tokenId,
-        uint256 salt,
-        bytes memory initData
-    ) external returns (address);
-}
-
-contract MockERC6551Registry is IERC6551Registry {
-    event CreateAccount(
-        address implementation, uint256 chainId, address tokenContract, uint256 tokenId, uint256 salt, bytes initData
-    );
-
-    function createAccount(
-        address implementation,
-        uint256 chainId,
-        address tokenContract,
-        uint256 tokenId,
-        uint256 salt,
-        bytes memory initData
-    ) external override returns (address) {
-        emit CreateAccount(implementation, chainId, tokenContract, tokenId, salt, initData);
-        return address(
-            uint160(uint256(keccak256(abi.encode(implementation, chainId, tokenContract, tokenId, salt, initData))))
-        );
-    }
-}
-
 contract AjnaOracleTest is Test {
     AJNAOracle public oracle;
-    MockERC6551Registry public registry;
 
     uint256 private backendPrivateKey = 0xA11CE;
     address private backendSigner;
     address private user = address(0xBEEF);
     address private admin = address(0xADEF);
-    address private implementation = address(0x1234);
     bytes32 private constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
 
     event RitualOpened(uint256 indexed tokenId, uint256 indexed nonce, uint256 indexed sacredTimestamp);
-    event CreateAccount(address implementation, uint256 chainId, address tokenContract, uint256 tokenId, uint256 salt, bytes initData);
 
     function setUp() public {
         backendSigner = vm.addr(backendPrivateKey);
-        registry = new MockERC6551Registry();
 
         vm.startPrank(admin);
         oracle = new AJNAOracle(
             "AJNAOracle",
             "AJNA",
-            address(registry),
-            implementation,
             backendSigner,
             "ipfs://"
         );
@@ -87,8 +50,6 @@ contract AjnaOracleTest is Test {
     function testInitialState() public view {
         assertEq(oracle.name(), "AJNAOracle");
         assertEq(oracle.symbol(), "AJNA");
-        assertEq(address(oracle.erc6551Registry()), address(registry));
-        assertEq(oracle.erc6551Implementation(), implementation);
         assertEq(oracle.backendSigner(), backendSigner);
         assertTrue(oracle.hasRole(oracle.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(oracle.hasRole(oracle.ADMIN_ROLE(), admin));
@@ -210,17 +171,6 @@ contract AjnaOracleTest is Test {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, user, ADMIN_ROLE));
         oracle.setBackendSigner(address(0x9876));
-    }
-
-    // ERC6551 Account Creation Tests
-    function testTokenBoundAccountCreation() public {
-        uint256 deadline = block.timestamp + 1 days;
-        bytes memory sig = _signVoucher(user, 1, deadline);
-        
-        vm.prank(user);
-        vm.expectEmit(true, true, true, true);
-        emit CreateAccount(implementation, block.chainid, address(oracle), 0, 0, "");
-        oracle.redeemVoucher(user, 1, deadline, sig, 1, "hash", "cid");
     }
 
     // Token Enumeration Tests

@@ -7,4 +7,21 @@ remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
 ]
 
+[rpc_endpoints]
+wld = "${WLD_RPC_URL}"
+
+[etherscan]
+wld = { key = "${ETHERSCAN_API_KEY}" }
+
+[profile.deploy]
+via_ir = true
+optimizer = true
+optimizer_runs = 20000
+evm_version = "paris"
+
+[profile.fork]
+via_ir = true
+fork_block_number = 1000
+fork_url = "${WLD_RPC_URL}"
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options
