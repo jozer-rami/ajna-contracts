@@ -17,7 +17,7 @@ contract DeployScript is Script {
             "AJNAOracle",
             "AJNA",
             vm.addr(deployerPrivateKey), // Using deployer as initial backend signer
-            "ipfs://" // Base URI for token metadata
+            "https://ajnaoracle.xyz/metadata/" // Using /metadata/ as a dedicated path for token metadata
         );
 
         vm.stopBroadcast();

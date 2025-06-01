@@ -52,24 +52,24 @@ contract AjnaOracleTest is Test {
         assertEq(oracle.symbol(), "AJNA");
         assertEq(oracle.backendSigner(), backendSigner);
         assertEq(oracle.owner(), admin);
-        assertTrue(oracle.whitelistEnabled());
+        assertFalse(oracle.whitelistEnabled());
     }
 
     // Whitelist Toggle Tests
     function testToggleWhitelist() public {
         vm.startPrank(admin);
         
+        // Toggle on (since it starts disabled)
+        vm.expectEmit(true, true, true, true);
+        emit WhitelistToggled(true);
+        oracle.toggleWhitelist();
+        assertTrue(oracle.whitelistEnabled());
+        
         // Toggle off
         vm.expectEmit(true, true, true, true);
         emit WhitelistToggled(false);
         oracle.toggleWhitelist();
         assertFalse(oracle.whitelistEnabled());
-        
-        // Toggle on
-        vm.expectEmit(true, true, true, true);
-        emit WhitelistToggled(true);
-        oracle.toggleWhitelist();
-        assertTrue(oracle.whitelistEnabled());
         
         vm.stopPrank();
     }
@@ -81,28 +81,28 @@ contract AjnaOracleTest is Test {
     }
 
     function testMintWithDisabledWhitelist() public {
-        // First try minting without being whitelisted (should fail)
-        vm.prank(user);
-        vm.expectRevert("Not whitelisted");
-        oracle.mintWhitelisted(1, "hash", "cid");
-
-        // Disable whitelist
-        vm.prank(admin);
-        oracle.toggleWhitelist();
-
-        // Now anyone should be able to mint
+        // Initially whitelist is disabled, anyone should be able to mint
         vm.prank(user);
         oracle.mintWhitelisted(1, "hash", "cid");
         assertEq(oracle.ownerOf(0), user);
 
-        // Enable whitelist again
+        // Enable whitelist
         vm.prank(admin);
         oracle.toggleWhitelist();
 
-        // Should fail again for non-whitelisted users
+        // Should fail for non-whitelisted users
         vm.prank(user);
         vm.expectRevert("Not whitelisted");
         oracle.mintWhitelisted(2, "hash2", "cid2");
+
+        // Disable whitelist again
+        vm.prank(admin);
+        oracle.toggleWhitelist();
+
+        // Should work again for anyone
+        vm.prank(user);
+        oracle.mintWhitelisted(3, "hash3", "cid3");
+        assertEq(oracle.ownerOf(1), user);
     }
 
     // Voucher Redemption Tests
@@ -171,6 +171,11 @@ contract AjnaOracleTest is Test {
     }
 
     function testWhitelistMintingUnauthorized() public {
+        // Enable whitelist first
+        vm.prank(admin);
+        oracle.toggleWhitelist();
+        
+        // Now try to mint without being whitelisted
         vm.prank(user);
         vm.expectRevert("Not whitelisted");
         oracle.mintWhitelisted(1, "hash", "cid");
@@ -178,6 +183,7 @@ contract AjnaOracleTest is Test {
 
     function testRemoveFromWhitelist() public {
         vm.startPrank(admin);
+        oracle.toggleWhitelist(); // Enable whitelist first
         oracle.addToWhitelist(user);
         oracle.removeFromWhitelist(user);
         vm.stopPrank();

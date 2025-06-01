@@ -67,7 +67,7 @@ contract AJNAOracle is
     {
         backendSigner = backendSigner_;
         _baseTokenURI = baseURI_;
-        whitelistEnabled = true; // Whitelist is enabled by default
+        whitelistEnabled = false; // Changed from true to false
     }
 
     /// @notice Redeem a signed voucher to mint a revelation.
